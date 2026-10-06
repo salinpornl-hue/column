@@ -620,7 +620,7 @@ with col1:
             nx = ny  = 0
 
         db     = st.selectbox("Bar Size (mm)", [16, 20, 25, 28, 32], index=2, key="db_main")
-        cover  = st.number_input("Clear Cover (cm)", value=4.0, min_value=2.5, key="cover_main")
+        cover  = st.number_input("Clear Cover (cm)", value=4.0, min_value=4.0, key="cover_main")
 
         st.markdown("---")
         st.markdown("**🔗 Bundled Bars (ACI 318-19 §26.6.3)**")
@@ -709,11 +709,11 @@ with col1:
     with st.expander("3. Shear, Torsion & Seismic", expanded=True):
         st.subheader("🛡️ Shear Design")
         cv5, cv6 = st.columns(2)
-        vux_ton = cv5.number_input("Vux (ton)", value=5.0, step=1.0, key="vux_main")
-        vuy_ton = cv6.number_input("Vuy (ton)", value=5.0, step=1.0, key="vuy_main")
+        vux_ton = cv5.number_input("Vux (ton)", value=5.0, step=1.0, help="เฉือนที่เกิดคู่กับ Mux — แรงขนานด้านลึก h (bw=b, d=h−d')", key="vux_main")
+        vuy_ton = cv6.number_input("Vuy (ton)", value=5.0, step=1.0, help="เฉือนที่เกิดคู่กับ Muy — แรงขนานด้านลึก b (bw=h, d=b−d')", key="vuy_main")
 
         c7, c8 = st.columns(2)
-        tie_dia  = c7.selectbox("Tie ⌀ (mm)", [6, 9, 12, 16], index=1, format_func=lambda x: f"RB{x}" if x < 10 else f"DB{x}", key="tie_dia_main")
+        tie_dia  = c7.selectbox("Tie ⌀ (mm)", [9, 12, 16], index=0, format_func=lambda x: f"RB{x}" if x < 10 else f"DB{x}", key="tie_dia_main")
         tie_legs = c8.number_input("Stirrup Legs", 2, 10, 2, key="tie_legs_main")
 
         st.markdown("---")
@@ -732,8 +732,8 @@ df_y, _          = engine.solve_pm(axis='Y')
 # ── Minimum eccentricity moments  ACI 318-19 §6.6.4.5.4 ──────────────────────
 e_min_x   = Pu * (0.015 + 0.03 * h / 100.0)
 e_min_y   = Pu * (0.015 + 0.03 * b / 100.0)
-Mu_x_dsgn = max(Mux, e_min_x)
-Mu_y_dsgn = max(Muy, e_min_y)
+Mu_x_dsgn = max(abs(Mux), e_min_x)   # [REVIEW] use |Mux|
+Mu_y_dsgn = max(abs(Muy), e_min_y)   # [REVIEW] use |Muy|
 
 # ── Moment magnification ──────────────────────────────────────────────────────
 kl_rx, Pcx, del_x, Ise_x, EIx = engine.slenderness_magnifier(
@@ -858,15 +858,24 @@ with col_main:
     # ══════════════════════════════════════════════════════════════════════════
     # TABS
     # ══════════════════════════════════════════════════════════════════════════
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    # ── Input → Design → Magnified moment table (explains why plotted Mc ≠ typed Mu) ──
+    st.markdown("##### 🔎 ที่มาของโมเมนต์ที่ใช้ตรวจสอบและ plot  (ค่าที่กรอก → ค่าออกแบบ → ค่าหลังขยาย)")
+    _mom = pd.DataFrame([
+        {"แกน": "X  (Mux · ดัดรอบแกน X · ความลึก h)", "Mu ที่กรอก": abs(Mux), "Mu,min = Pu·e_min": e_min_x,
+         "Mu ออกแบบ = max": Mu_x_dsgn, "kl/r": kl_rx, "ตัวคูณรวม": Mcx / max(Mu_x_dsgn, 1e-9), "Mc ที่ plot (t-m)": Mcx},
+        {"แกน": "Y  (Muy · ดัดรอบแกน Y · ความลึก b)", "Mu ที่กรอก": abs(Muy), "Mu,min = Pu·e_min": e_min_y,
+         "Mu ออกแบบ = max": Mu_y_dsgn, "kl/r": kl_ry, "ตัวคูณรวม": Mcy / max(Mu_y_dsgn, 1e-9), "Mc ที่ plot (t-m)": Mcy},
+    ]).round(3)
+    st.dataframe(_mom, use_container_width=True, hide_index=True)
+    st.caption("กราฟทุกกราฟ plot **Mc** (โมเมนต์หลังขยายด้วย δ และไม่ต่ำกว่า Mu,min) เป็นจุด ✚ ส่วนค่าที่กรอกจริง (Mu) แสดงเป็นวงกลมโปร่ง ○ "
+               "— Mc จึงมากกว่า Mu ได้เมื่อ kl/r > 22 หรือ Mu,min ควบคุม")
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📥 Overview & 3D",
         "📊 P-M Interaction",
         "🧊 Section Detail",
         "🌪️ Shear & Seismic",
         "📝 Calc Report",
-        "⚡ Quick Sizing",
-        "⚡ Quick Sizing2",
-        "⚡ Quick PM",
     ])
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -892,8 +901,14 @@ with col_main:
                         mode='markers+text',
                         marker=dict(size=9, color=mc, symbol='diamond',
                                     line=dict(width=2, color='white')),
-                        text=["Demand"], textposition="top center",
-                        name='Design Demand'))
+                        text=["Design Mc"], textposition="top center",
+                        name='Design Mc (หลังขยาย)'))
+                    fig3d.add_trace(go.Scatter3d(
+                        x=[abs(Mux)], y=[abs(Muy)], z=[Pu], mode='markers+text',
+                        marker=dict(size=7, color='#7f8c8d', symbol='circle-open',
+                                    line=dict(width=3, color='#7f8c8d')),
+                        text=["Input Mu"], textposition="bottom center",
+                        name='Input Mu (ไม่ขยาย)'))
                     fig3d.add_trace(go.Scatter3d(
                         x=[Mcx, Mcx], y=[Mcy, Mcy], z=[0, Pu],
                         mode='lines', line=dict(color=mc, width=3, dash='dot'),
@@ -955,15 +970,19 @@ with col_main:
                 text=[f'φMnox={phi_Mnox:.1f}', f'φMnoy={phi_Mnoy:.1f}'],
                 textposition=['top right', 'top right']))
             fig_c.add_trace(go.Scatter(
-                x=[Mcx], y=[Mcy], mode='markers+text', name='Demand',
+                x=[Mcx], y=[Mcy], mode='markers+text', name='Design point Mc (หลังขยาย)',
                 marker=dict(color=mc, size=14, symbol='cross',
                             line=dict(width=2, color='white')),
                 text=["Design Point"], textposition="top right"))
+            fig_c.add_trace(go.Scatter(
+                x=[abs(Mux)], y=[abs(Muy)], mode='markers+text', name='Input Mu (ที่กรอก)',
+                marker=dict(color='#7f8c8d', size=11, symbol='circle-open', line=dict(width=3)),
+                text=["Input Mu"], textposition="bottom right"))
             fig_c.add_shape(type="line", x0=0, y0=0, x1=Mcx, y1=Mcy,
                             line=dict(color=mc, width=2, dash='dashdot'))
 
-            mx_rng = max(phi_Mnox, Mcx) * 1.2
-            my_rng = max(phi_Mnoy, Mcy) * 1.2
+            mx_rng = max(phi_Mnox, Mcx, abs(Mux)) * 1.2
+            my_rng = max(phi_Mnoy, Mcy, abs(Muy)) * 1.2
             fig_c.update_layout(
                 xaxis=dict(title='Magnified Mcx (ton-m)', range=[0, mx_rng],
                            showgrid=True, gridcolor='rgba(0,0,0,0.06)',
@@ -981,7 +1000,7 @@ with col_main:
         st.markdown("#### 📈 Uniaxial P-M Projections")
         col_pmx, col_pmy = st.columns(2)
 
-        def pm_side_chart(df, Mc, label, color):
+        def pm_side_chart(df, Mc, label, color, Mu_in=None):
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=df['phiMn'], y=df['phiPn'], mode='lines',
@@ -992,7 +1011,12 @@ with col_main:
                 x=[Mc], y=[Pu], mode='markers',
                 marker=dict(color='#e74c3c', size=12, symbol='cross',
                             line=dict(width=2, color='white')),
-                name='Demand'))
+                name='Mc', hovertemplate="Mc (หลังขยาย): %{x:.2f} t-m<extra></extra>"))
+            if Mu_in is not None:
+                fig.add_trace(go.Scatter(
+                    x=[abs(Mu_in)], y=[Pu], mode='markers',
+                    marker=dict(color='#7f8c8d', size=11, symbol='circle-open', line=dict(width=3)),
+                    name='Mu', hovertemplate="Mu (ที่กรอก): %{x:.2f} t-m<extra></extra>"))
             fig.add_shape(type="line", x0=0, y0=Pu, x1=Mc, y1=Pu,
                           line=dict(color="#e74c3c", width=1, dash="dot"))
             fig.add_shape(type="line", x0=Mc, y0=df['phiPn'].min() * 1.05, x1=Mc, y1=Pu,
@@ -1013,10 +1037,10 @@ with col_main:
             return fig
 
         with col_pmx:
-            st.plotly_chart(pm_side_chart(df_x, Mcx, "P-Mx (Major Axis)", "#2980b9"),
+            st.plotly_chart(pm_side_chart(df_x, Mcx, "P-Mx (about X-axis, depth h)", "#2980b9", Mux),
                             use_container_width=True)
         with col_pmy:
-            st.plotly_chart(pm_side_chart(df_y, Mcy, "P-My (Minor Axis)", "#27ae60"),
+            st.plotly_chart(pm_side_chart(df_y, Mcy, "P-My (about Y-axis, depth b)", "#27ae60", Muy),
                             use_container_width=True)
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -1024,7 +1048,7 @@ with col_main:
     # ─────────────────────────────────────────────────────────────────────────
     with tab2:
         st.markdown("### 📊 P-M Interaction Diagram")
-        show_bounds = st.toggle("Show ACI ρ-limits (1% & 8%)", value=True, key="show_bounds_t2")
+        show_bounds = st.toggle("Show ACI ρ-limits (min & max)", value=True, key="show_bounds_t2")
         show_keys   = st.toggle("Label Key Points", value=True, key="show_keys_t2")
 
         fig_pm = go.Figure()
@@ -1058,7 +1082,7 @@ with col_main:
 
             with st.spinner("Computing boundary curves…"):
                 df_1, rho_1_actual = make_ref_df(0.01)
-                df_8, rho_8_actual = make_ref_df(0.08)
+                df_8, rho_8_actual = make_ref_df(rho_max / 100.0)
 
             if not df_1.empty and not df_8.empty:
                 # Ensure ρ=8% curve is always plotted OUTSIDE ρ=1% (sanity check)
@@ -1069,7 +1093,7 @@ with col_main:
                     x=xp, y=yp, fill='toself',
                     fillcolor='rgba(46,204,113,0.10)',
                     line=dict(color='rgba(0,0,0,0)'),
-                    name='Optimal Zone 1–8%', hoverinfo='skip'))
+                    name='Optimal Zone (ρ min–max)', hoverinfo='skip'))
                 for df_lim, nm, clr in [
                         (df_1, f'Min (ρ={rho_1_actual:.2f}%)', 'rgba(149,165,166,0.9)'),
                         (df_8, f'Max (ρ={rho_8_actual:.2f}%)', 'rgba(231,76,60,0.6)')]:
@@ -1105,8 +1129,12 @@ with col_main:
             x=[Mcx, Mcy], y=[Pu, Pu], mode='markers',
             marker=dict(color=['#e74c3c', '#e67e22'], size=14,
                         symbol='cross', line=dict(width=2, color='white')),
-            name='Demands (Mcx, Mcy)',
+            name='Design Mc (Mcx บนเส้น X, Mcy บนเส้น Y)',
             hovertemplate="<b>Demand</b><br>Mc: %{x:.2f} t-m<br>Pu: %{y:.2f} ton<extra></extra>"))
+        fig_pm.add_trace(go.Scatter(
+            x=[abs(Mux), abs(Muy)], y=[Pu, Pu], mode='markers', name='Input Mux, Muy (ที่กรอก)',
+            marker=dict(size=11, symbol='circle-open', color=['#e74c3c', '#e67e22'],
+                        line=dict(width=3, color=['#e74c3c', '#e67e22']))))
         for Mc, clr in [(Mcx, '#e74c3c'), (Mcy, '#e67e22')]:
             fig_pm.add_shape(type="line", x0=0, y0=Pu, x1=Mc, y1=Pu,
                              line=dict(color=clr, width=1, dash='dot'))
@@ -1149,7 +1177,7 @@ with col_main:
         st.markdown("### 🧊 Cross-Section & BIM Cage")
         bx = [bar['x'] for bar in engine.bars]
         by = [bar['y'] for bar in engine.bars]
-        cv2 = cover
+        cv2 = cover + engine.tie_cm / 2.0   # [REVIEW] tie centre-line, not clear cover
 
         dark = '#020617'; blue = '#38bdf8'; red = '#ef4444'; gold = '#fbbf24'
         orange = '#f97316'; violet = '#a78bfa'
@@ -1349,7 +1377,7 @@ with col_main:
 
         # ── 3D cage ───────────────────────────────────────────────────────────
         with sub_tabs[cage_3d_idx]:
-            L_col = max(b, h) * 4
+            L_col = min(max(Lu_x, 1.0) * 100.0, 600.0)   # [REVIEW] follows Lu input
             fig3d_cage = go.Figure()
             # For bundled bars, render individual bars with offsets in 3D too
             db_c = engine.db_cm
@@ -1804,695 +1832,3 @@ $$T_{{th}} = \\phi\\,0.265\\sqrt{{f'_c}}\\frac{{A_{{cp}}^2}}{{p_{{cp}}}}$$
 | Single-bar compression splice | {splice_data['l_compression_single']:.1f} cm | ≥ 30 cm | ACI §25.5.5.1 | ✅ |
 | Torsion critical? | {"Yes" if shear['torsion_critical'] else "No"} | Tu ≤ Tth | ACI §22.7.4.1 | {"❌" if shear['torsion_critical'] else "✅"} |
 """)
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # TAB 6 – Quick Sizing
-    # ─────────────────────────────────────────────────────────────────────────
-    with tab6:
-        st.markdown("### ⚡ Quick Sizing Tool")
-        st.markdown("Estimate minimum section dimensions from slenderness limits.")
-
-        qs1, qs2, qs3 = st.columns(3)
-        q_L       = qs1.number_input("Unbraced Length (m)", 1.0, 30.0, 4.0, 0.5, key="q_L_qs")
-        q_K       = qs2.number_input("K factor", 0.5, 2.0, 1.0, 0.1, key="q_K_qs")
-        q_klr_lim = qs3.slider("Target kl/r limit", 10, 50, 22, key="q_klr_qs")
-
-        with st.expander("Material Settings", expanded=False):
-            qm1, qm2, qm3 = st.columns(3)
-            q_fc  = qm1.number_input("f'c (ksc)", 140, 700, 280, key="q_fc_qs")
-            q_fy  = qm2.number_input("fy  (ksc)", 2400, 6000, 4000, key="q_fy_qs")
-            q_rho = qm3.slider("Target ρ (%)", 1.0, 6.0, 2.0, 0.5, key="q_rho_qs") / 100.0
-
-        KL_cm = q_K * q_L * 100.0
-        min_h = KL_cm / (0.3 * q_klr_lim)
-        min_D = KL_cm / (0.25 * q_klr_lim)
-        sug_h = math.ceil(min_h / 5.0) * 5
-        sug_D = math.ceil(min_D / 5.0) * 5
-
-        def quick_cap(dim, shape_t):
-            Ag_q   = dim**2 if shape_t == "Rect" else math.pi * dim**2 / 4
-            Ast_q  = Ag_q * q_rho
-            phi_q  = PHI_COMP_T if shape_t == "Rect" else PHI_COMP_S
-            fac_q  = 0.80       if shape_t == "Rect" else 0.85
-            Po_q   = (0.85 * q_fc * (Ag_q - Ast_q) + q_fy * Ast_q) / 1_000.0
-            r_q    = 0.3 * dim  if shape_t == "Rect" else 0.25 * dim
-            klr_q  = KL_cm / r_q
-            penalty = max(0.1, 1.0 - 0.008 * max(0, klr_q - q_klr_lim))
-            return phi_q * fac_q * Po_q * penalty, klr_q
-
-        cap_r, klr_r = quick_cap(sug_h, "Rect")
-        cap_c, klr_c = quick_cap(sug_D, "Circ")
-
-        qr1, qr2 = st.columns(2)
-        with qr1:
-            st.markdown(f"""
-<div style="background:#1e293b;padding:20px;border-radius:10px;border-top:4px solid #38bdf8;">
-<p style="color:#94a3b8;margin:0;font-size:12px;">RECTANGULAR (Tied)</p>
-<h2 style="color:white;margin:8px 0;">{sug_h} × {sug_h} cm</h2>
-<p style="color:#94a3b8;font-size:13px;">kl/r = {klr_r:.1f} &nbsp;|&nbsp; Est. φPn,max ≈</p>
-<h1 style="color:#38bdf8;margin:0;">{cap_r:,.1f} <span style="font-size:16px">ton</span></h1>
-</div>""", unsafe_allow_html=True)
-        with qr2:
-            st.markdown(f"""
-<div style="background:#1e293b;padding:20px;border-radius:10px;border-top:4px solid #4ade80;">
-<p style="color:#94a3b8;margin:0;font-size:12px;">CIRCULAR (Spiral)</p>
-<h2 style="color:white;margin:8px 0;">Ø {sug_D} cm</h2>
-<p style="color:#94a3b8;font-size:13px;">kl/r = {klr_c:.1f} &nbsp;|&nbsp; Est. φPn,max ≈</p>
-<h1 style="color:#4ade80;margin:0;">{cap_c:,.1f} <span style="font-size:16px">ton</span></h1>
-</div>""", unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("#### Sensitivity Table (Rectangular)")
-        rows = []
-        for s_dim in [sug_h - 10, sug_h - 5, sug_h, sug_h + 5, sug_h + 10]:
-            if s_dim <= 0: continue
-            cap_s, klr_s = quick_cap(s_dim, "Rect")
-            rows.append({
-                "Size (cm)": f"{s_dim}×{s_dim}",
-                "kl/r": round(klr_s, 1),
-                "Status": "🟢 Short" if klr_s <= q_klr_lim else "🔴 Slender",
-                "Est. φPn,max (ton)": round(cap_s, 1),
-            })
-        st.table(rows)
-
-        with st.expander("Step-by-Step Derivation", expanded=False):
-            st.latex(rf"KL = {q_K} \times {q_L} \times 100 = {KL_cm:.0f}\text{{ cm}}")
-            st.markdown("**Rectangular** — r ≈ 0.3h:")
-            st.latex(rf"h_{{min}} = \frac{{KL}}{{0.3 \times {q_klr_lim}}} = {min_h:.2f} \rightarrow {sug_h}\text{{ cm}}")
-            st.markdown("**Circular** — r ≈ 0.25D:")
-            st.latex(rf"D_{{min}} = \frac{{KL}}{{0.25 \times {q_klr_lim}}} = {min_D:.2f} \rightarrow {sug_D}\text{{ cm}}")
-with tab7:
-    st.header("🏢 Preliminary Column Sizing (ACI SP-17M(14) Sec 9.8)")
-    st.markdown("""
-    เครื่องมือประมาณขนาดหน้าตัดเสาคอนกรีตเสริมเหล็กขั้นต้นเพื่อใช้ขึ้นรูปโครงสร้าง 
-    *(คำนวณตามระบบหน่วยหลักของแอปพลิเคชัน: **ton, ksc, cm**)*
-    """)
-
-    # แบ่งหน้าจอเป็น 2 คอลัมน์ (ฝั่งรับค่าป้อนข้อมูล กับ ฝั่งแสดงผลลัพธ์)
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.subheader("📥 ป้อนข้อมูลแรงและวัสดุ (MKS)")
-        
-        # รับค่าแรงอัดปรับกำลังสูงสุด Pu (ton)
-        p_u = st.number_input(
-            "แรงอัดปรับกำลังสูงสุดจากโครงสร้าง, Pu (ton)", 
-            min_value=0.0, 
-            value=150.0, 
-            step=10.0,
-            key="prelim_pu"
-        )
-        
-        # รับค่ากำลังอัดคอนกรีต f'c (ksc)
-        f_c = st.number_input(
-            "กำลังอัดของคอนกรีต, f'c (ksc)", 
-            min_value=50.0, 
-            value=280.0, 
-            step=10.0,
-            key="prelim_fc"
-        )
-        
-        # ประเภทของโครงสร้างตามเงื่อนไขแรงด้านข้าง
-        structure_type = st.selectbox(
-            "ประเภทของโครงสร้าง / การรับแรงแผ่นดินไหว",
-            options=[
-                "Ordinary (อาคารทั่วไป / แรงลมปกติ)", 
-                "High Seismic (เขตแผ่นดินไหวรุนแรง)"
-            ],
-            key="prelim_struct_type"
-        )
-        
-        # รูปทรงหน้าตัดเสาที่ต้องการ
-        column_shape = st.selectbox(
-            "รูปทรงหน้าตัดเสาที่ต้องการออกแบบ",
-            options=["สี่เหลี่ยมจัตุรัส (Square)", "สี่เหลี่ยมผืนผ้า (Rectangular)", "กลม (Circular)"],
-            key="prelim_col_shape"
-        )
-
-        # เงื่อนไขเพิ่มเติมกรณีเลือกเสาสี่เหลี่ยมผืนผ้า
-        if column_shape == "สี่เหลี่ยมผืนผ้า (Rectangular)":
-            b_input = st.number_input(
-                "กำหนดความกว้างหน้าตัดเสาด้านหนึ่ง, b (cm)", 
-                min_value=15.0, 
-                value=30.0, 
-                step=5.0,
-                key="prelim_b_input"
-            )
-
-    with col2:
-        st.subheader("📊 ผลการวิเคราะห์หน้าตัดเสาขั้นต้น")
-        
-        # คัดเลือกตัวหาร (Factor) และจัดรูปแบบสูตรแสดงบนหน้าจอตามประเภทอาคาร
-        if "Ordinary" in structure_type:
-            factor = 0.4
-            formula_text = r"A_g = \frac{P_u}{0.4 f'_c}"
-        else:
-            factor = 0.3
-            formula_text = r"A_g = \frac{P_u}{0.3 f'_c}"
-            
-        st.markdown(f"**สูตรตามคู่มือ ACI SP-17M(14):**")
-        st.latex(formula_text)
-            
-        # คำนวณ Ag ที่ต้องการ (แปลง Pu จาก ton เป็น kgf โดยคูณ 1000 เพื่อตัดหน่วยกับ ksc)
-        p_u_kg = p_u * 1000.0
-        ag_required = p_u_kg / (factor * f_c)
-        
-        st.metric(
-            label="พื้นที่หน้าตัดคอนกรีตขั้นต่ำที่ต้องการ (Ag Required)", 
-            value=f"{ag_required:,.2f} cm²"
-        )
-        
-        # ฟังก์ชันช่วยปัดมิติเสาขึ้นทีละ 5 cm ตามขนาดไม้แบบมาตรฐานไทย
-        def round_up_to_5(val):
-            import numpy as np
-            return int(np.ceil(val / 5.0) * 5.0)
-
-        st.markdown("---")
-        st.markdown("### 📐 มิติหน้าตัดเสาที่แนะนำให้ใช้:")
-        
-        import numpy as np
-        if column_shape == "สี่เหลี่ยมจัตุรัส (Square)":
-            side_req = np.sqrt(ag_required)
-            side_rec = max(round_up_to_5(side_req), 20)  # กำหนดขนาดขั้นต่ำไว้ที่ 20 cm
-            ag_actual = side_rec * side_rec
-            st.success(f"🟩 **ใช้เสาสี่เหลี่ยมขนาด:** {side_rec} × {side_rec} cm")
-            st.write(f"• พื้นที่หน้าตัดหน้างานจริง: **{ag_actual:,.0f} cm²**")
-
-        elif column_shape == "สี่เหลี่ยมผืนผ้า (Rectangular)":
-            h_req = ag_required / b_input
-            h_rec = max(round_up_to_5(h_req), 20)
-            ag_actual = b_input * h_rec
-            st.success(f"🟪 **ใช้เสาสี่เหลี่ยมขนาด:** {int(b_input)} × {h_rec} cm")
-            st.write(f"• พื้นที่หน้าตัดหน้างานจริง: **{ag_actual:,.0f} cm²**")
-            
-        elif column_shape == "กลม (Circular)":
-            diameter_req = np.sqrt((4 * ag_required) / np.pi)
-            diameter_rec = max(round_up_to_5(diameter_req), 20)
-            ag_actual = (np.pi / 4) * (diameter_rec ** 2)
-            st.success(f"🔵 **ใช้เสากลมเส้นผ่านศูนย์กลาง Ø:** {diameter_rec} cm")
-            st.write(f"• พื้นที่หน้าตัดหน้างานจริง: **{ag_actual:,.0f} cm²**")
-
-        # ส่วนประเมินเหล็กเสริมเบื้องต้น (Rule of thumb 1% - 2%)
-        st.markdown("---")
-        st.markdown("### 🔩 ประมาณการปริมาณเหล็กเสริมรวมเบื้องต้น (As,est)")
-        ast_min = ag_actual * 0.01
-        ast_max = ag_actual * 0.02
-        st.info(f"💡 ควรเลือกจัดกลุ่มเหล็กเสริมให้มีพื้นที่รวมอยู่ระหว่าง: **{ast_min:,.2f} ถึง {ast_max:,.2f} cm²**")
-
-    # === ส่วนแสดงวิธีทำแบบละเอียดแยกออกมาด้านล่าง เพื่อความสวยงามกว้างขวาง ===
-    st.markdown("---")
-    with st.expander("📝 แสดงวิธีทำแบบละเอียด (Show Calculation Steps)", expanded=False):
-        st.subheader("📋 ขั้นตอนการคำนวณหาขนาดเสาขั้นต้น")
-        
-        st.markdown("##### **ขั้นตอนที่ 1: แปลงหน่วยแรงและเลือกสมการ**")
-        st.markdown(f"- แปลงแรงอัดปรับกำลังจากตันเป็นกิโลกรัม: $P_u = {p_u:,.2f} \\text{{ ton}} \\times 1000 = {p_u_kg:,.2f} \\text{{ kgf}}$")
-        st.markdown(f"- กำลังอัดประลัยของคอนกรีต: $f'_c = {f_c:,.2f} \\text{{ ksc}}$")
-        st.markdown(f"- เนื่องจากเป็นโครงสร้างแบบ **{structure_type.split(' ')[0]}** จึงเลือกใช้ตัวหารหารเท่ากับ **{factor}**")
-        
-        st.markdown("##### **ขั้นตอนที่ 2: คำนวณหาพื้นที่หน้าตัดคอนกรีตขั้นต่ำ ($A_g$)**")
-        if factor == 0.4:
-            st.latex(r"A_g = \frac{P_u}{0.4 \cdot f'_c}")
-            st.latex(f"A_g = \\frac{{{p_u_kg:,.2f}}}{{0.4 \\times {f_c:,.2f}}} = {ag_required:,.2f} \\text{{ cm}}^2")
-        else:
-            st.latex(r"A_g = \frac{P_u}{0.3 \cdot f'_c}")
-            st.latex(f"A_g = \\frac{{{p_u_kg:,.2f}}}{{0.3 \\times {f_c:,.2f}}} = {ag_required:,.2f} \\text{{ cm}}^2")
-            
-        st.markdown("##### **ขั้นตอนที่ 3: ถอดสัดส่วนตามรูปทรงและปัดเศษขึ้นทีละ 5 cm**")
-        
-        if column_shape == "สี่เหลี่ยมจัตุรัส (Square)":
-            st.latex(r"\text{ความยาวด้านเสาที่ต้องการ} = \sqrt{A_g}")
-            st.latex(f"\\text{{Side Required}} = \\sqrt{{{ag_required:,.2f}}} = {side_req:.2f} \\text{{ cm}}")
-            st.markdown(f"- ปัดเศษขึ้นให้ลงตัวที่ 5 cm ได้ความยาวด้านละ: **{side_rec} cm**")
-            st.markdown(f"- พื้นที่หน้าตัดเสาจริงหน้างาน: $A_{{g,\\text{{actual}}}} = {side_rec} \\times {side_rec} = {ag_actual:,.2f} \\text{{ cm}}^2$")
-            
-        elif column_shape == "สี่เหลี่ยมผืนผ้า (Rectangular)":
-            st.latex(r"\text{ความลึกด้านที่เหลือ } (h) = \frac{A_g}{b}")
-            st.latex(f"h_{{\\text{{Required}}}} = \\frac{{{ag_required:,.2f}}}{{{b_input:,.2f}}} = {h_req:.2f} \\text{{ cm}}")
-            st.markdown(f"- คงค่าความกว้างหน้าตัดด้าน $b = {b_input} \\text{{ cm}}$")
-            st.markdown(f"- ปัดเศษด้าน $h$ ขึ้นให้ลงตัวที่ 5 cm ได้ความลึกเสา: **{h_rec} cm**")
-            st.markdown(f"- พื้นที่หน้าตัดเสาจริงหน้างาน: $A_{{g,\\text{{actual}}}} = {b_input} \\times {h_rec} = {ag_actual:,.2f} \\text{{ cm}}^2$")
-            
-        elif column_shape == "กลม (Circular)":
-            st.latex(r"\text{เส้นผ่านศูนย์กลาง } (D) = \sqrt{\frac{4 \cdot A_g}{\pi}}")
-            st.latex(f"D_{{\\text{{Required}}}} = \\sqrt{{\\frac{{4 \\times {ag_required:,.2f}}}{{\\pi}}}} = {diameter_req:.2f} \\text{{ cm}}")
-            st.markdown(f"- ปัดเศษเส้นผ่านศูนย์กลางขึ้นให้ลงตัวที่ 5 cm ได้: **{diameter_rec} cm**")
-            st.markdown(f"- พื้นที่หน้าตัดเสาจริงหน้างาน: $A_{{g,\\text{{actual}}}} = \\frac{{\\pi \\cdot {diameter_rec}^2}}{{4}} = {ag_actual:,.2f} \\text{{ cm}}^2$")
-
-        st.markdown("##### **ขั้นตอนที่ 4: ประมาณเนื้อที่เหล็กเสริมรวมตามข้อแนะนำ (1% - 2%)**")
-        st.latex(r"A_{st,\text{min}} = A_{g,\text{actual}} \times 0.01 \quad \text{และ} \quad A_{st,\text{max}} = A_{g,\text{actual}} \times 0.02")
-        st.latex(f"A_{{st}} = {ast_min:,.2f} \\text{{ ถึง }} {ast_max:,.2f} \\text{{ cm}}^2")
-        st.caption("หมายเหตุ: ค่าเหล็กเสริมนี้เป็นค่าประมาณเบื้องต้นเพื่อใช้ล็อกปริมาณเหล็กในแบบร่าง วิศวกรต้องนำขนาดหน้าตัดนี้ไปเช็กกำลังรับแรงอัดร่วมกับโมเมนต์ดัด (Interaction Diagram) ที่ละเอียดอีกครั้ง")
-# นำบล็อกนี้ไปวางเยื้องใต้ตรรกะ st.tabs ของคุณ (เช่น สร้าง tab_pm ขึ้นมาใหม่)
-
-with tab8:
-    st.header("📈 Advanced P-M Interaction & φ-Factor Dashboard")
-    st.markdown("วิเคราะห์กำลังหน้าตัดเสาและตัวคูณลดกำลัง (ACI 318-19) พร้อมแสดงรายการคำนวณและแผนภาพหน้าตัดสมจริง")
-
-    import numpy as np
-    import pandas as pd
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
-
-    # ─── 1. LAYOUT MANAGEMENT ───
-    col_input, col_dash = st.columns([1, 2.2])
-
-    with col_input:
-        st.subheader("📥 1. พารามิเตอร์หน้าตัดและการจัดเหล็ก")
-        col_type = st.radio("ประเภทเสา / ปลอก", ["ปลอกเดี่ยว (Tied)", "ปลอกเกลียว (Spiral)"], horizontal=True, key="pm_v8_type")
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            b = st.number_input("ความกว้าง, b (cm)", min_value=15.0, value=30.0, step=5.0, key="pm_v8_b")
-            cover = st.number_input("ระยะหุ้ม, d' (cm)", min_value=3.0, value=5.0, step=0.5, key="pm_v8_cov")
-        with c2:
-            h = st.number_input("ความลึก, h (cm)", min_value=15.0, value=50.0, step=5.0, key="pm_v8_h")
-            fc = st.number_input("f'c (ksc)", min_value=150.0, value=280.0, step=10.0, key="pm_v8_fc")
-            
-        fy = st.number_input("กำลังครากเหล็กแกน, fy (ksc)", min_value=2400.0, value=4000.0, step=100.0, key="pm_v8_fy")
-        
-        st.markdown("🔩 **การจัดเรียงเหล็กเสริมแกนหลัก**")
-        rebar_dict = {"DB12": 1.2, "DB16": 1.6, "DB20": 2.0, "DB25": 2.5, "DB28": 2.8, "DB32": 3.2}
-        rebar_choice = st.selectbox("ขนาดเหล็กแกนหลัก", list(rebar_dict.keys()), index=2, key="pm_v8_rb")
-        n_bars = st.number_input("จำนวนเส้นรวม (เลขคู่ ≥ 4)", min_value=4, value=8, step=2, key="pm_v8_n")
-        
-        db_dia = rebar_dict[rebar_choice]
-        ast = n_bars * (np.pi * db_dia**2) / 4.0
-        rho_pct = (ast / (b * h)) * 100
-        st.info(f"พื้นที่เหล็กเสริมรวม: **{ast:.2f} cm²** (ρ = {rho_pct:.2f}%)")
-
-        st.markdown("🔗 **การจัดเหล็กปลอก (Transverse Reinforcement)**")
-        tie_dict = {"RB6": 0.6, "RB9": 0.9, "DB10": 1.0, "DB12": 1.2}
-        tie_choice = st.selectbox("ขนาดเหล็กปลอก", list(tie_dict.keys()), index=1, key="pm_v8_tie_rb")
-        dv_dia = tie_dict[tie_choice]
-        
-        fyt = st.number_input("กำลังครากเหล็กปลอก, fyt (ksc)", min_value=2400.0, value=2400.0 if "RB" in tie_choice else 4000.0, step=100.0, key="pm_v8_fyt")
-        tie_s = st.number_input("ระยะห่างเหล็กปลอก, s (cm)", min_value=2.0, value=15.0, step=0.5, key="pm_v8_s")
-        
-        # ─── แสดงรายการคำนวณเหล็กปลอกแบบละเอียด ───
-        with st.expander("📝 ดูรายการคำนวณและตรวจสอบเหล็กปลอก", expanded=False):
-            if "Tied" in col_type:
-                s_max1 = 16 * db_dia
-                s_max2 = 48 * dv_dia
-                s_max3 = min(b, h)
-                s_max = min(s_max1, s_max2, s_max3)
-                
-                st.markdown("**เกณฑ์ระยะเรียงสูงสุดของเสาปลอกเดี่ยว (ACI 318)**")
-                st.latex(r"s_{\max} = \min(16d_b, 48d_v, \text{ด้านแคบสุด})")
-                st.latex(f"1.\\; 16d_b = 16 \\times {db_dia:.1f} = \\mathbf{{{s_max1:.1f} \\text{{ cm}}}}")
-                st.latex(f"2.\\; 48d_v = 48 \\times {dv_dia:.1f} = \\mathbf{{{s_max2:.1f} \\text{{ cm}}}}")
-                st.latex(f"3.\\; \\text{{Least Dim.}} = \\min({b:.1f}, {h:.1f}) = \\mathbf{{{s_max3:.1f} \\text{{ cm}}}}")
-                st.latex(f"\\therefore s_{{\\max}} = \\mathbf{{{s_max:.1f} \\text{{ cm}}}}")
-                
-                if tie_s <= s_max:
-                    st.success(f"✅ ระยะปลอกเดี่ยวผ่านเกณฑ์ ($s = {tie_s:.1f} \\le {s_max:.1f}$ cm)")
-                else:
-                    st.error(f"❌ ระยะปลอกเกินมาตรฐาน! (ต้อง $\\le {s_max:.1f}$ cm)")
-            else:
-                # คำนวณแกนคอนกรีตสำหรับปลอกเกลียว (Core Concrete)
-                D_c = min(b, h) - 2.0 * (cover - db_dia/2.0)
-                if D_c <= 0: D_c = min(b, h) * 0.8
-                A_c = (np.pi * D_c**2) / 4.0
-                Ag_temp = b * h
-                rho_s_req = max(0.45 * ((Ag_temp / A_c) - 1.0) * (fc / fyt), 0.12 * fc / fyt)   # [REVIEW] ACI Table 25.7.3.3
-                A_sp = (np.pi * dv_dia**2) / 4.0
-                rho_s_provided = (4.0 * A_sp) / (D_c * tie_s)
-                
-                st.markdown("**เกณฑ์เหล็กปลอกเกลียว (ACI 318)**")
-                st.latex(r"D_c = \text{Core Diameter} \approx " + f"{D_c:.2f} \\text{{ cm}}")
-                st.latex(f"A_c = \\frac{{\\pi D_c^2}}{{4}} = {A_c:.2f} \\text{{ cm}}^2")
-                
-                st.markdown("**1. ปริมาณเหล็กปลอกเกลียวที่ต้องการ ($\\rho_{s,\\min}$)**")
-                st.latex(r"\rho_{s,\min} = 0.45 \left( \frac{A_g}{A_c} - 1 \right) \frac{f'_c}{f_{yt}}")
-                st.latex(f"\\rho_{{s,\\min}} = 0.45 \\left( \\frac{{{Ag_temp:.2f}}}{{{A_c:.2f}}} - 1 \\right) \\frac{{{fc:.0f}}}{{{fyt:.0f}}} = \\mathbf{{{rho_s_req:.4f}}}")
-                
-                st.markdown("**2. ปริมาณเหล็กปลอกเกลียวที่ใส่จริง ($\\rho_{s,\\text{prov}}$)**")
-                st.latex(r"\rho_{s,\text{prov}} = \frac{4 A_{sp}}{D_c s}")
-                st.latex(f"\\rho_{{s,\\text{{prov}}}} = \\frac{{4 \\times {A_sp:.2f}}}{{{D_c:.2f} \\times {tie_s:.1f}}} = \\mathbf{{{rho_s_provided:.4f}}}")
-                
-                if (tie_s - dv_dia) < 2.5 or (tie_s - dv_dia) > 7.5:   # clear spacing, not pitch
-                    st.error(f"❌ ระยะพิทช์ปลอกเกลียวผิดข้อกำหนด! ระยะช่องว่างสุทธิต้องอยู่ในช่วง 2.5 - 7.5 cm (ปัจจุบัน: {tie_s - dv_dia:.1f} cm)")
-                elif rho_s_provided < rho_s_req:
-                    st.error(f"❌ ปริมาณเหล็กปลอกเกลียวไม่เพียงพอ! (ใส่จริง {rho_s_provided:.4f} < ต้องการ {rho_s_req:.4f})")
-                else:
-                    st.success(f"✅ ปลอกเกลียวผ่านเกณฑ์ ($\\rho_{{s,\\text{{prov}}}} \\ge \\rho_{{s,\\min}}$ และ $s$ อยู่ในช่วง 2.5-7.5 cm)")
-                  
-        st.markdown("🎯 **จุดแรงใช้งานตรวจสอบ (Demand)**")
-        pu_check = st.number_input("แรงอัดใช้งาน, Pu (ton)", value=45.0, key="pm_v8_pu")
-        mu_check = st.number_input("โมเมนต์ใช้งาน, Mu (ton-m)", value=8.5, key="pm_v8_mu")
-
-    # ─── 2. MECHANICS & SOLVER ───
-    Es = 2040000.0 
-    ecu = 0.003    
-    d = h - cover  
-    Ag = b * h     
-    As_half = ast / 2.0 
-    
-    phi_c = 0.65 if "Tied" in col_type else 0.75
-    alpha_max = 0.80 if "Tied" in col_type else 0.85
-    beta1 = 0.85 if fc <= 280 else max(0.65, 0.85 - 0.05 * ((fc - 280) / 70.0))
-    ety = fy / Es
-    et_lim = ety + 0.003   # [REVIEW] ACI 21.2.2 (was fixed 0.005)
-
-    def calc_pm_detailed(c):
-        if c <= 0.0001: 
-            return 0, 0, 0.01, 0, -fy, 0, 0, As_half*fy, -(fy * ast)/1000.0, 0.0, 0.90
-        a = min(beta1 * c, h)
-        Cc = 0.85 * fc * a * b
-        eps_s_prime = ecu * (c - cover) / c
-        eps_t = ecu * (d - c) / c
-        
-        fs_prime = min(Es * eps_s_prime, fy) if eps_s_prime >= 0 else max(Es * eps_s_prime, -fy)
-        fs = min(Es * eps_t, fy) if eps_t >= 0 else max(Es * eps_t, -fy)
-        
-        Cs = As_half * (fs_prime - 0.85 * fc) if eps_s_prime > 0 else As_half * fs_prime
-        T = As_half * fs 
-        
-        Pn = (Cc + Cs - T) / 1000.0
-        Mn = (Cc * (h/2 - a/2) + Cs * (h/2 - cover) + T * (d - h/2)) / 100000.0
-        
-        if eps_t <= ety: phi = phi_c
-        elif eps_t >= et_lim: phi = 0.90
-        else: phi = phi_c + (0.90 - phi_c) * (eps_t - ety) / (et_lim - ety)
-            
-        return a, eps_s_prime, eps_t, fs_prime, fs, Cc, Cs, T, Pn, Mn, phi
-
-    c_vals = np.linspace(0.005, h * 3.0, 700)[::-1]
-    P_nom, M_nom, P_des, M_des, eps_t_arr, phi_arr = [], [], [], [], [], []
-    Po_kg = 0.85 * fc * (Ag - ast) + fy * ast
-    Pn_max = (alpha_max * Po_kg) / 1000.0
-    phi_Pn_max = phi_c * Pn_max
-    
-    for c_val in c_vals:
-        _, _, et, _, _, _, _, _, pn, mn, ph = calc_pm_detailed(c_val)
-        P_nom.append(pn); M_nom.append(mn); P_des.append(min(pn * ph, phi_Pn_max)); M_des.append(mn * ph)
-        eps_t_arr.append(et); phi_arr.append(ph)
-
-    P1, M1 = Po_kg / 1000.0, 0.0
-    a2, eps_s_prime2, eps_t2, fs_prime2, fs2, Cc2, Cs2, T2, P2, M2, phi2 = calc_pm_detailed(d)
-    cb = d * (0.003 / (0.003 + ety))
-    a3, eps_s_prime3, eps_t3, fs_prime3, fs3, Cc3, Cs3, T3, P3, M3, phi3 = calc_pm_detailed(cb)
-    idx_m0 = np.argmin(np.abs(np.array(P_nom)))
-    c_m0 = c_vals[idx_m0]
-    a4, eps_s_prime4, eps_t4, fs_prime4, fs4, Cc4, Cs4, T4, P4, M4, phi4 = calc_pm_detailed(c_m0)
-    P5, M5 = -(fy * ast) / 1000.0, 0.0
-
-    if pu_check != 0 or mu_check != 0:
-        if pu_check == 0:
-            idx_chk = idx_m0
-        else:
-            e_demand = mu_check / pu_check
-            e_des = np.zeros_like(P_des)
-            for i, p in enumerate(P_des):
-                if p != 0:
-                    e_des[i] = M_des[i] / p
-                else:
-                    e_des[i] = float('inf')
-            idx_chk = np.argmin(np.abs(e_des - e_demand))
-        eps_t_chk, phi_chk = eps_t_arr[idx_chk], phi_arr[idx_chk]
-
-    # ─── 3. DRAWING DASHBOARD ───
-    with col_dash:
-        st.subheader("📊 2. แผนภูมิคู่ขนาน P-M Interaction และ ตัวคูณลดกำลัง (φ)")
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8.5, 9.5))
-        
-        ax1.plot(M_nom, P_nom, color='#3b82f6', linestyle='--', linewidth=1.5, label='Nominal Capacity')
-        ax1.plot(M_des, M_des, color='#10b981', linewidth=2.5, label='Design Capacity') # Fix plot bug for M_des, P_des
-        ax1.lines[-1].set_xdata(M_des); ax1.lines[-1].set_ydata(P_des) 
-        ax1.fill_between(M_des, 0, P_des, color='#10b981', alpha=0.1)
-        ax1.axhline(phi_Pn_max, color='#b91c1c', linestyle='-.', label=f'$\\phi P_{{n,\\max}}$ = {phi_Pn_max:.1f} t')
-        pts_M = [M1, M2, M3, M4, M5]
-        pts_P = [P1, P2, P3, P4, P5]
-        ax1.scatter(pts_M, pts_P, color='#ef4444', s=40, zorder=5)
-        for i, txt in enumerate(['1', '2', '3', '4', '5']):
-            ax1.annotate(txt, (pts_M[i], pts_P[i]), weight='bold', fontsize=9, bbox=dict(boxstyle='circle,pad=0.2', fc='white', ec='gray', lw=0.5))
-        if pu_check != 0 or mu_check != 0:
-            ax1.scatter([mu_check], [pu_check], color='#f59e0b', s=150, marker='*', zorder=6, edgecolors='black', label='Demand Point')
-        ax1.set_xlabel('Bending Moment, $M_u$ (ton-m)', weight='bold')
-        ax1.set_ylabel('Axial Load, $P_u$ (ton)', weight='bold')
-        ax1.grid(True, linestyle=':', alpha=0.6)
-        ax1.legend(loc='upper right', fontsize=8)
-
-        x_max_lim = 0.012
-        if (pu_check != 0 or mu_check != 0) and eps_t_chk > 0.010:
-            x_max_lim = eps_t_chk + 0.003
-            
-        et_plot = np.linspace(-0.001, x_max_lim, 500)
-        phi_plot = np.where(et_plot <= ety, phi_c, np.where(et_plot >= et_lim, 0.90, phi_c + (0.90 - phi_c)*(et_plot - ety)/(et_lim - ety)))
-        ax2.plot(et_plot, phi_plot, color='#475569', linewidth=2)
-        ax2.axvspan(-0.001, ety, color='#fee2e2', alpha=0.4, label='Compression-Controlled')
-        ax2.axvspan(ety, et_lim, color='#fef3c7', alpha=0.4, label='Transition Zone')
-        ax2.axvspan(et_lim, x_max_lim, color='#dcfce7', alpha=0.4, label='Tension-Controlled')
-        if pu_check != 0 or mu_check != 0:
-            ax2.scatter([eps_t_chk], [phi_chk], color='#f59e0b', s=150, marker='*', edgecolors='black', zorder=6, label=f'Mapped Demand ($\\phi$={phi_chk:.3f})')
-        ax2.set_xlabel('Net Tensile Strain, $\\epsilon_t$', weight='bold')
-        ax2.set_ylabel('Strength Reduction Factor, $\\phi$', weight='bold')
-        ax2.set_ylim(phi_c - 0.05, 0.95)
-        ax2.set_xlim(-0.001, x_max_lim)
-        ax2.grid(True, linestyle=':', alpha=0.6)
-        ax2.legend(loc='lower right', fontsize=8)
-        
-        plt.tight_layout()
-        st.pyplot(fig)
-
-    # ─── 4. SUMMARY TABLE ───
-    st.markdown("---")
-    st.subheader("📋 3. ตารางสรุปพฤติกรรมหน้าตัด 5 จุดวิกฤต")
-    summary_df = pd.DataFrame([
-        {"จุดสำคัญ": "1. Pure Comp", "c (cm)": "∞", "a (cm)": f"{h:.2f}", "Pn (ton)": f"{P1:,.2f}", "Mn (t-m)": "0.00", "φ": f"{phi_c:.2f}", "φPn (ton)": f"{phi_Pn_max:,.2f}", "φMn (t-m)": "0.00"},
-        {"จุดสำคัญ": "2. Zero Tension", "c (cm)": f"{d:.2f}", "a (cm)": f"{a2:.2f}", "Pn (ton)": f"{P2:,.2f}", "Mn (t-m)": f"{M2:,.2f}", "φ": f"{phi2:.2f}", "φPn (ton)": f"{min(P2*phi2, phi_Pn_max):,.2f}", "φMn (t-m)": f"{M2*phi2:,.2f}"},
-        {"จุดสำคัญ": "3. Balanced", "c (cm)": f"{cb:.2f}", "a (cm)": f"{a3:.2f}", "Pn (ton)": f"{P3:,.2f}", "Mn (t-m)": f"{M3:,.2f}", "φ": f"{phi3:.2f}", "φPn (ton)": f"{min(P3*phi3, phi_Pn_max):,.2f}", "φMn (t-m)": f"{M3*phi3:,.2f}"},
-        {"จุดสำคัญ": "4. Pure Bending", "c (cm)": f"{c_m0:.2f}", "a (cm)": f"{a4:.2f}", "Pn (ton)": f"{P4:,.2f}", "Mn (t-m)": f"{M4:,.2f}", "φ": f"{phi4:.2f}", "φPn (ton)": f"{P4*phi4:,.2f}", "φMn (t-m)": f"{M4*phi4:,.2f}"},
-        {"จุดสำคัญ": "5. Pure Tension", "c (cm)": "0.00", "a (cm)": "0.00", "Pn (ton)": f"{P5:,.2f}", "Mn (t-m)": "0.00", "φ": "0.90", "φPn (ton)": f"{P5*0.90:,.2f}", "φMn (t-m)": "0.00"}
-    ])
-    st.dataframe(summary_df, use_container_width=True)
-
-    # ─── 5. DETAILED PROFILES & CALCULATIONS ───
-    st.markdown("---")
-    st.subheader("📐 4. รายการคำนวณแบบจำลองหน้าตัด (Detailed Section Analysis)")
-    
-    st.markdown(fr"""
-    <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; border-left: 5px solid #475569; margin-bottom: 20px;">
-        <span style="font-weight: bold; color: #1e293b; font-size: 15px;">📝 ข้อสมมติฐานหลักในการคำนวณ (Design Assumptions):</span><br>
-        • ความเครียดอัดสูงสุดของคอนกรีต (Ultimate Concrete Strain): <b>&epsilon;<sub>cu</sub> = {ecu:.3f}</b><br>
-        • โมดูลัสยืดหยุ่นของเหล็กเสริม (Modulus of Elasticity): <b>E<sub>s</sub> = {Es:,.0f} ksc</b>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # คำนวณระยะแขนของแรงลัพธ์จากจุด Plastic Centroid (h/2) ไว้ล่วงหน้าเพื่อใช้ในการแทนค่าทางคณิตศาสตร์
-    arm_Cc2, arm_Cs2, arm_T2 = (h/2.0 - a2/2.0)/100.0, (h/2.0 - cover)/100.0, (d - h/2.0)/100.0
-    arm_Cc3, arm_Cs3, arm_T3 = (h/2.0 - a3/2.0)/100.0, (h/2.0 - cover)/100.0, (d - h/2.0)/100.0
-    arm_Cc4, arm_Cs4, arm_T4 = (h/2.0 - a4/2.0)/100.0, (h/2.0 - cover)/100.0, (d - h/2.0)/100.0
-
-    def draw_compact_profile(b_w, h_d, cov, c_in, a_in, e_cu, e_t, fs_prime, fs, Cc, Cs, T, title_name):
-        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(11, 4), gridspec_kw={'width_ratios': [1, 1.2, 1.5]})
-        fig.patch.set_facecolor('white')
-        
-        def draw_dim(ax, x, y1, y2, text, color='gray'):
-            ax.annotate('', xy=(x, y1), xytext=(x, y2), arrowprops=dict(arrowstyle='<->', color=color, lw=1))
-            ax.text(x + 0.5, (y1+y2)/2, text, color=color, va='center', ha='left', fontsize=8, rotation=270)
-
-        for ax in (ax1, ax2, ax3):
-            ax.set_ylim(-h_d * 0.15, h_d * 1.15)
-            ax.axis('off')
-            ax.axhline(0, color='black', lw=1.5)
-            ax.axhline(h_d, color='black', lw=1.5)
-
-        # 1. CROSS SECTION
-        ax1.plot([0, b_w, b_w, 0, 0], [0, 0, h_d, h_d, 0], color='#1e293b', lw=2)
-        ax1.fill([0, b_w, b_w, 0, 0], [0, 0, h_d, h_d, 0], color='#f8fafc')
-        
-        if "Tied" in col_type:
-            tie_offset = cov * 0.7
-            rect_tie = patches.Rectangle((tie_offset, tie_offset), b_w - 2*tie_offset, h_d - 2*tie_offset, fill=False, edgecolor='#64748b', linewidth=1.5, linestyle='-', zorder=2)
-            ax1.add_patch(rect_tie)
-        else:
-            r_core = min(b_w, h_d)/2 - cov * 0.7
-            circle_tie = patches.Circle((b_w/2, h_d/2), r_core, fill=False, edgecolor='#64748b', linewidth=1.5, linestyle='-', zorder=2)
-            ax1.add_patch(circle_tie)
-
-        ax1.scatter([b_w/4, 3*b_w/4], [h_d-cov, h_d-cov], color='#b91c1c', s=80, zorder=3)
-        ax1.scatter([b_w/4, 3*b_w/4], [cov, cov], color='#1d4ed8', s=80, zorder=3)
-        
-        draw_dim(ax1, -b_w*0.3, 0, h_d, f"h = {h_d:.1f}")
-        draw_dim(ax1, -b_w*0.6, cov, h_d, f"d = {h_d-cov:.1f}")
-        
-        if 0 < c_in < h_d * 1.5:
-            ax1.axhline(h_d - c_in, color='#e11d48', linestyle='--', lw=1.2)
-            ax1.text(b_w*1.05, h_d - c_in, "N.A.", color='#e11d48', weight='bold', va='center', fontsize=9)
-            draw_dim(ax1, b_w*1.2, h_d - c_in, h_d, f"c = {c_in:.2f}", color='#e11d48')
-
-        ax1.set_xlim(-b_w*0.8, b_w*1.6)
-        ax1.set_title("Cross Section", weight='bold', fontsize=11)
-
-        # 2. STRAIN PROFILE
-        ax2.axvline(0, color='#94a3b8', lw=1.5, linestyle='--')
-        if title_name == "Pure Compression":
-            ax2.plot([e_cu, e_cu], [0, h_d], color='#10b981', lw=2, marker='o', markersize=4)
-            ax2.text(e_cu*1.1, h_d/2, f"ε={e_cu:.3f}", color='#047857', weight='bold', va='center')
-            ax2.set_xlim(-e_cu*0.5, e_cu*2.5)
-        elif title_name == "Pure Tension":
-            ax2.plot([-0.005, -0.005], [0, h_d], color='#ef4444', lw=2, marker='o', markersize=4)
-            ax2.text(-0.0055, h_d/2, "ε_t=-0.005", color='#b91c1c', weight='bold', va='center', ha='right')
-            ax2.set_xlim(-0.01, 0.002)
-        else:
-            ax2.plot([e_cu, -e_t], [h_d, cov], color='#10b981', lw=2, marker='o', markersize=4)
-            ax2.text(e_cu + 0.0005, h_d, f"ε_c={e_cu:.3f}", color='#047857', weight='bold', va='bottom')
-            ax2.text(-e_t - 0.0005, cov, f"ε_t={-e_t:.4f}", color='#1e3a8a', weight='bold', va='top', ha='right' if -e_t < 0 else 'left')
-            ax2.axhline(h_d - c_in, color='#e11d48', linestyle=':', lw=1)
-            max_st = max(abs(e_cu), abs(e_t))
-            ax2.set_xlim(-max_st*1.5, max_st*1.5)
-        ax2.set_title("Strain Profile", weight='bold', fontsize=11)
-
-        # 3. STRESS & FORCES
-        ax3.axvline(0, color='#94a3b8', lw=1.5, linestyle='--')
-        scale_w = 100
-        ax3.set_xlim(-scale_w*1.5, scale_w*2.5)
-        
-        if a_in > 0 and title_name != "Pure Tension":
-            rect = patches.Rectangle((0, h_d - a_in), scale_w, a_in, fill=True, color='#fee2e2', hatch='////', ec='red', alpha=0.5)
-            ax3.add_patch(rect)
-            ax3.annotate('', xy=(0, h_d - a_in/2), xytext=(scale_w*1.2, h_d - a_in/2), arrowprops=dict(arrowstyle="->", color='#b91c1c', lw=2))
-            ax3.text(scale_w*1.3, h_d - a_in/2, f"Cc = {Cc/1000:.1f} t", color='#b91c1c', weight='bold', va='center')
-            draw_dim(ax3, -scale_w*0.5, h_d - a_in, h_d, f"a = {a_in:.2f}", color='#b91c1c')
-            
-        if abs(Cs) > 10:
-            dir_c = 1 if fs_prime >= 0 else -1
-            ax3.annotate('', xy=(0, h_d - cov), xytext=(dir_c*scale_w*0.9, h_d - cov), arrowprops=dict(arrowstyle="->", color='#ea580c', lw=2))
-            ax3.text(dir_c*scale_w, h_d - cov, f"Cs = {Cs/1000:.1f} t", color='#ea580c', weight='bold', va='center', ha='left' if dir_c>0 else 'right')
-
-        if abs(T) > 10:
-            dir_t = -1 if fs >= 0 else 1
-            ax3.annotate('', xy=(0, cov), xytext=(dir_t*scale_w*1.2, cov), arrowprops=dict(arrowstyle="->", color='#1d4ed8', lw=2))
-            ax3.text(dir_t*scale_w*1.3, cov, f"T = {abs(T)/1000:.1f} t", color='#1d4ed8', weight='bold', va='center', ha='left' if dir_t>0 else 'right')
-        ax3.set_title("Stress & Forces", weight='bold', fontsize=11)
-
-        plt.subplots_adjust(wspace=0.2, left=0.05, right=0.95, top=0.85, bottom=0.05)
-        return fig
-
-    t1, t2, t3, t4, t5 = st.tabs(["1. Pure Comp", "2. Zero Tension", "3. Balanced Point", "4. Pure Bending", "5. Pure Tension"])
-
-    with t1:
-        st.pyplot(draw_compact_profile(b, h, cover, h*5, h, ecu, 0, fy, 0, P1*1000, 0, 0, "Pure Compression"), bbox_inches='tight')
-        st.markdown("#### 📑 รายการแทนค่าสมการคำนวณ (Detailed Value Substitution)")
-        
-        st.markdown("**1. พื้นที่หน้าตัดคอนกรีตทั้งหมด (Gross Concrete Area, $A_g$)**")
-        st.latex(r"A_g = b \times h")
-        st.latex(fr"A_g = {b:.1f} \times {h:.1f} = \mathbf{{{Ag:,.2f} \text{{ cm}}^2}}")
-        
-        st.markdown("**2. กำลังรับแรงอัดระบุสูงสุดสุทธิ (Nominal Axial Strength, $P_o$)**")
-        st.latex(r"P_o = 0.85 f'_c (A_g - A_{st}) + f_y A_{st}")
-        st.latex(fr"P_o = 0.85 \times {fc:.0f} \times ({Ag:,.2f} - {ast:.2f}) + {fy:.0f} \times {ast:.2f}")
-        st.latex(fr"P_o = {Po_kg:,.1f} \text{{ kgf}} = \mathbf{{{P1:,.2f} \text{{ ton}}}}")
-        
-        st.markdown("**3. กำลังอัดออกแบบจำกัดสูงสุด (Max Design Capacity, $\\phi P_{n,\\max}$)**")
-        st.latex(r"\phi P_{n,\max} = \phi \cdot \alpha \cdot P_o")
-        st.latex(fr"\phi P_{{n,\max}} = {phi_c:.2f} \times {alpha_max:.2f} \times {P1:,.2f}")
-        st.latex(fr"\phi P_{{n,\max}} = \mathbf{{{phi_Pn_max:,.2f} \text{{ ton}}}}")
-
-    with t2:
-        st.pyplot(draw_compact_profile(b, h, cover, d, a2, ecu, eps_t2, fs_prime2, fs2, Cc2, Cs2, T2, "Zero Tension"), bbox_inches='tight')
-        st.markdown("#### 📑 รายการแทนค่าสมการคำนวณ (Detailed Value Substitution)")
-        
-        col_f1, col_f2 = st.columns(2)
-        with col_f1:
-            st.markdown("**1. ข้อมูลรูปทรงและแกนสะเทิน ($c, a$)**")
-            st.latex(r"c = h - d'")
-            st.latex(fr"c = {h:.1f} - {cover:.1f} = \mathbf{{{d:.2f} \text{{ cm}}}}")
-            st.latex(r"a = \beta_1 \cdot c")
-            st.latex(fr"a = {beta1:.2f} \times {d:.2f} = \mathbf{{{a2:.2f} \text{{ cm}}}}")
-            
-            st.markdown("**2. ความเครียดและหน่วยแรงเหล็กอัด ($\\epsilon'_s, f'_s$)**")
-            st.latex(r"\epsilon'_s = \epsilon_{cu} \left( \frac{c - d'}{c} \right)")
-            st.latex(fr"\epsilon'_s = {ecu:.3f} \times \left( \frac{{{d:.2f} - {cover:.1f}}}{{{d:.2f}}} \right) = \mathbf{{{eps_s_prime2:.5f}}}")
-            st.latex(r"f'_s = \min(E_s \cdot \epsilon'_s, f_y)")
-            st.latex(fr"f'_s = \min(2,040,000 \times {eps_s_prime2:.5f}, {fy:.0f}) = \mathbf{{{fs_prime2:,.0f} \text{{ ksc}}}}")
-
-        with col_f2:
-            st.markdown("**3. แรงลัพธ์ภายในจากวัสดุ (Internal Forces)**")
-            st.latex(r"C_c = 0.85 f'_c \cdot a \cdot b")
-            st.latex(fr"C_c = 0.85 \times {fc:.0f} \times {a2:.2f} \times {b:.1f} = \mathbf{{{Cc2/1000:,.2f} \text{{ ton}}}}")
-            st.latex(r"C_s = A'_s (f'_s - 0.85 f'_c)")
-            st.latex(fr"C_s = {As_half:.2f} \times ({fs_prime2:,.0f} - 0.85 \times {fc:.0f}) = \mathbf{{{Cs2/1000:,.2f} \text{{ ton}}}}")
-            st.latex(r"T = A_s \cdot f_s \quad (\epsilon_t = 0)")
-            st.latex(fr"T = {As_half:.2f} \times {fs2:,.1f} = \mathbf{{{T2/1000:,.2f} \text{{ ton}}}}")
-            
-            st.markdown("**4. กำลังรับแรงรวมของหน้าตัด ($P_n, M_n$)**")
-            st.latex(r"P_n = C_c + C_s - T")
-            st.latex(fr"P_n = {Cc2/1000:,.2f} + {Cs2/1000:,.2f} - {T2/1000:,.2f} = \mathbf{{{P2:,.2f} \text{{ ton}}}}")
-            
-            st.latex(r"M_n = C_c\left(\frac{h}{2} - \frac{a}{2}\right) + C_s\left(\frac{h}{2} - d'\right) + T\left(d - \frac{h}{2}\right)")
-            st.latex(fr"M_n = {Cc2/1000:,.2f}({arm_Cc2:.3f}) + {Cs2/1000:,.2f}({arm_Cs2:.3f}) + {T2/1000:,.2f}({arm_T2:.3f})")
-            st.latex(fr"M_n = {Cc2/1000*arm_Cc2:,.2f} + {Cs2/1000*arm_Cs2:,.2f} + {T2/1000*arm_T2:,.2f} = \mathbf{{{M2:,.2f} \text{{ ton-m}}}}")
-
-    with t3:
-        st.pyplot(draw_compact_profile(b, h, cover, cb, a3, ecu, eps_t3, fs_prime3, fs3, Cc3, Cs3, T3, "Balanced"), bbox_inches='tight')
-        st.markdown("#### 📑 รายการแทนค่าสมการคำนวณ (Detailed Value Substitution)")
-        
-        col_f1, col_f2 = st.columns(2)
-        with col_f1:
-            st.markdown("**1. ความเครียดครากและแกนสะเทินสมดุล ($\\epsilon_y, c_b$)**")
-            st.latex(r"\epsilon_y = \frac{f_y}{E_s}")
-            st.latex(fr"\epsilon_y = \frac{{{fy:.0f}}}{{2,040,000}} = \mathbf{{{ety:.5f}}}")
-            st.latex(r"c_b = d \left( \frac{\epsilon_{cu}}{\epsilon_{cu} + \epsilon_y} \right)")
-            st.latex(fr"c_b = {d:.2f} \times \left( \frac{{{ecu:.3f}}}{{{ecu:.3f} + {ety:.5f}}} \right) = \mathbf{{{cb:.2f} \text{{ cm}}}}")
-            st.latex(r"a_b = \beta_1 \cdot c_b")
-            st.latex(fr"a_b = {beta1:.2f} \times {cb:.2f} = \mathbf{{{a3:.2f} \text{{ cm}}}}")
-
-        with col_f2:
-            st.markdown("**2. แรงลัพธ์ภายใน ณ จุดสมดุล (Internal Forces)**")
-            st.latex(r"C_c = 0.85 f'_c \cdot a_b \cdot b")
-            st.latex(fr"C_c = 0.85 \times {fc:.0f} \times {a3:.2f} \times {b:.1f} = \mathbf{{{Cc3/1000:,.2f} \text{{ ton}}}}")
-            st.latex(r"C_s = A'_s (f'_s - 0.85 f'_c)")
-            st.latex(fr"C_s = {As_half:.2f} \times ({fs_prime3:,.0f} - 0.85 \times {fc:.0f}) = \mathbf{{{Cs3/1000:,.2f} \text{{ ton}}}}")
-            st.latex(r"T = A_s \cdot f_y")
-            st.latex(fr"T = {As_half:.2f} \times {fy:.0f} = \mathbf{{{T3/1000:,.2f} \text{{ ton}}}}")
-            
-            st.markdown("**3. กำลังรับแรงรวมระบุระนาบสมดุล ($P_n, M_n$)**")
-            st.latex(r"P_n = C_c + C_s - T")
-            st.latex(fr"P_n = {Cc3/1000:,.2f} + {Cs3/1000:,.2f} - {T3/1000:,.2f} = \mathbf{{{P3:,.2f} \text{{ ton}}}}")
-            st.latex(r"M_n = C_c\left(\frac{h}{2} - \frac{a}{2}\right) + C_s\left(\frac{h}{2} - d'\right) + T\left(d - \frac{h}{2}\right)")
-            st.latex(fr"M_n = {Cc3/1000:,.2f}({arm_Cc3:.3f}) + {Cs3/1000:,.2f}({arm_Cs3:.3f}) + {T3/1000:,.2f}({arm_T3:.3f})")
-            st.latex(fr"M_n = {Cc3/1000*arm_Cc3:,.2f} + {Cs3/1000*arm_Cs3:,.2f} + {T3/1000*arm_T3:,.2f} = \mathbf{{{M3:,.2f} \text{{ ton-m}}}}")
-
-    with t4:
-        st.pyplot(draw_compact_profile(b, h, cover, c_m0, a4, ecu, eps_t4, fs_prime4, fs4, Cc4, Cs4, T4, "Pure Bending"), bbox_inches='tight')
-        st.markdown("#### 📑 รายการแทนค่าสมการคำนวณ (Detailed Value Substitution)")
-        
-        col_f1, col_f2 = st.columns(2)
-        with col_f1:
-            st.markdown("**1. ระยะแกนสะเทินที่คำนวณได้ (สุ่มจน $P_n \\approx 0$)**")
-            st.latex(fr"c = \mathbf{{{c_m0:.2f} \text{{ cm}}}}, \quad a = \mathbf{{{a4:.2f} \text{{ cm}}}}")
-            
-            st.markdown("**2. ตรวจสอบความเครียดที่ผิวเหล็กดึงเพื่อหาค่า $\\phi$**")
-            st.latex(r"\epsilon_t = \epsilon_{cu} \left( \frac{d - c}{c} \right)")
-            st.latex(fr"\epsilon_t = {ecu:.3f} \times \left( \frac{{{d:.2f} - {c_m0:.2f}}}{{{c_m0:.2f}}} \right) = \mathbf{{{eps_t4:.5f}}}")
-            st.markdown(fr"*($\epsilon_t = {eps_t4:.5f}$, เกณฑ์ tension-controlled $\epsilon_{{ty}}+0.003 = {et_lim:.5f}$ $\Rightarrow \phi = \mathbf{{{phi4:.2f}}}$)*")
-
-        with col_f2:
-            st.markdown("**3. แรงลัพธ์และโมเมนต์ดัดบริสุทธิ์ระบุ ($M_n$)**")
-            st.latex(r"C_c = 0.85 f'_c \cdot a \cdot b")
-            st.latex(fr"C_c = 0.85 \times {fc:.0f} \times {a4:.2f} \times {b:.1f} = \mathbf{{{Cc4/1000:,.2f} \text{{ ton}}}}")
-            st.latex(r"C_s = A'_s (f'_s - 0.85 f'_c)")
-            st.latex(fr"C_s = {As_half:.2f} \times ({fs_prime4:,.0f} - 0.85 \times {fc:.0f}) = \mathbf{{{Cs4/1000:,.2f} \text{{ ton}}}}")
-            st.latex(r"T = A_s \cdot f_s")
-            st.latex(fr"T = {As_half:.2f} \times {fs4:,.0f} = \mathbf{{{T4/1000:,.2f} \text{{ ton}}}}")
-            
-            st.latex(r"P_n = C_c + C_s - T")
-            st.latex(fr"P_n = {Cc4/1000:,.2f} + {Cs4/1000:,.2f} - {T4/1000:,.2f} = \mathbf{{{P4:,.2f} \text{{ ton}}}} \approx \mathbf{{0.00 \text{{ ton}}}}")
-            st.latex(r"M_n = C_c\left(\frac{h}{2} - \frac{a}{2}\right) + C_s\left(\frac{h}{2} - d'\right) + T\left(d - \frac{h}{2}\right)")
-            st.latex(fr"M_n = {Cc4/1000:,.2f}({arm_Cc4:.3f}) + {Cs4/1000:,.2f}({arm_Cs4:.3f}) + {T4/1000:,.2f}({arm_T4:.3f})")
-            st.latex(fr"M_n = {Cc4/1000*arm_Cc4:,.2f} + {Cs4/1000*arm_Cs4:,.2f} + {T4/1000*arm_T4:,.2f} = \mathbf{{{M4:,.2f} \text{{ ton-m}}}}")
-            st.latex(fr"\Rightarrow \phi M_n = {phi4:.2f} \times {M4:,.2f} = \mathbf{{{M4*phi4:,.2f} \text{{ ton-m}}}}")
-
-    with t5:
-        st.pyplot(draw_compact_profile(b, h, cover, 0, 0, 0, 0.01, 0, -fy, 0, 0, -P5*1000, "Pure Tension"), bbox_inches='tight')
-        st.markdown("#### 📑 รายการแทนค่าสมการคำนวณ (Detailed Value Substitution)")
-        
-        st.markdown("**1. สภาพการรับแรงของหน้าตัด**")
-        st.markdown("*เมื่อรับแรงดึงบริสุทธิ์ คอนกรีตจะแตกร้าวทั้งหมดและไม่ร่วมรับแรงต้านทานใดๆ ($C_c = 0, C_s = 0$)*")
-        
-        st.markdown("**2. กำลังรับแรงดึงระบุและการออกแบบสอดคล้องตามมาตรฐาน**")
-        st.latex(r"P_n = -A_{st} \times f_y")
-        st.latex(fr"P_n = -{ast:.2f} \times {fy:.0f} = {P5*1000:,.1f} \text{{ kgf}} = \mathbf{{{P5:,.2f} \text{{ ton}}}}")
-        st.latex(r"\phi P_n = 0.90 \times P_n")
-        st.latex(fr"\phi P_n = 0.90 \times ({P5:,.2f}) = \mathbf{{{P5*0.90:,.2f} \text{{ ton}}}}")
